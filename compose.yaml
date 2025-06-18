@@ -1,13 +1,58 @@
 services:
+  reverse-proxy:
+    image: traefik:v3.4
+    command:
+      - --api.insecure=true
+      - --providers.docker
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+
+      # Letsencrypt tls challenge
+      - --certificatesresolvers.myresolver.acme.tlschallenge=true
+      - --certificatesresolvers.myresolver.acme.email=johanna.stoicanescu@gmail.com
+      - --certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json
+    ports:
+      # The HTTP port
+      - "80:80"
+      # The HTTPS port
+      - "443:443"
+    volumes:
+      # So that Traefik can listen to the Docker events
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Let's encrypt folder with cert files
+      - ./letsencrypt:/letsencrypt
+    labels:
+      - "traefik.http.routers.api.rule=Host(`dashboard.johanna-stoicanescu.com`)"
+      - "traefik.http.routers.api.service=api@internal"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=myresolver"
+      # middleware redirect
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      # global redirect to https
+      - "traefik.http.routers.redirs.rule=hostregexp(`{host:.+}`)"
+      - "traefik.http.routers.redirs.entrypoints=web"
+      - "traefik.http.routers.redirs.middlewares=redirect-to-https"
+    networks:
+      - app-network
   app:
     build:
       context: .
       dockerfile: Dockerfile.app
+    depends_on:
+      - reverse-proxy
     ports:
       - "5173:5173"
     volumes:
       - ./app:/app
       - /app/node_modules
+    networks:
+      - app-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app.rule=Host(`mern-front.johanna-stoicanescu.com`)"
+      - "traefik.http.routers.app.entrypoints=websecure"
+
+      - "traefik.http.routers.app.tls.certresolver=myresolver"
 
   server:
     build:
@@ -15,8 +60,47 @@ services:
       dockerfile: Dockerfile.server
     ports:
       - "5050:5050"
+    depends_on:
+      - reverse-proxy
     volumes:
       - ./server:/server
       - /server/node_modules
+    networks:
+      - app-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.server.rule=Host(`mern-back.johanna-stoicanescu.com`)"
+      - "traefik.http.routers.server.entrypoints=websecure"
+      - "traefik.http.routers.server.tls.certresolver=myresolver"
 
+  mongo:
+    image: mongo
+    ports:
+      - 27017:27017
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: example
+    networks:
+      - app-network
 
+  # mongo-express:
+  #   image: mongo-express
+  #   ports:
+  #     - 8081:8081
+  #   environment:
+  #     ME_CONFIG_MONGODB_ADMINUSERNAME: root
+  #     ME_CONFIG_MONGODB_ADMINPASSWORD: example
+  #     ME_CONFIG_MONGODB_URL: mongodb://root:example@mongo:27017/
+  #     ME_CONFIG_BASICAUTH: false
+  #   depends_on:
+  #     - mongo
+  #   networks:
+  #     - app-network
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.mongo-express.rule=Host(`mongo-express.localhost`)"
+  #     - "traefik.http.services.mongo-express.loadbalancer.server.port=8081"
+
+networks:
+  app-network:
+    driver: bridge
