@@ -1,46 +1,8 @@
 services:
-  reverse-proxy:
-    image: traefik:v3.4
-    command:
-      - --api.insecure=true
-      - --providers.docker
-      - --entrypoints.web.address=:80
-      - --entrypoints.websecure.address=:443
-
-      # Letsencrypt tls challenge
-      - --certificatesresolvers.myresolver.acme.tlschallenge=true
-      - --certificatesresolvers.myresolver.acme.email=johanna.stoicanescu@gmail.com
-      - --certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json
-    ports:
-      # The HTTP port
-      - "80:80"
-      # The HTTPS port
-      - "443:443"
-    volumes:
-      # So that Traefik can listen to the Docker events
-      - /var/run/docker.sock:/var/run/docker.sock
-      # Let's encrypt folder with cert files
-      - ./letsencrypt:/letsencrypt
-    labels:
-      - "traefik.http.routers.api.rule=Host(`dashboard.johanna-stoicanescu.com`)"
-      - "traefik.http.routers.api.service=api@internal"
-      - "traefik.http.routers.api.entrypoints=websecure"
-      - "traefik.http.routers.api.tls.certresolver=myresolver"
-      # middleware redirect
-      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
-      # global redirect to https
-      - "traefik.http.routers.redirs.rule=hostregexp(`{host:.+}`)"
-      - "traefik.http.routers.redirs.entrypoints=web"
-      - "traefik.http.routers.redirs.middlewares=redirect-to-https"
-    networks:
-      - app-network
-
   app:
     build:
       context: .
       dockerfile: Dockerfile.app.prod
-    depends_on:
-      - reverse-proxy
     ports:
       - "5173:5173"
     volumes:
@@ -60,8 +22,6 @@ services:
       dockerfile: Dockerfile.server.prod
     ports:
       - "5050:5050"
-    depends_on:
-      - reverse-proxy
     volumes:
       - ./server:/server
       - /server/node_modules
@@ -85,4 +45,4 @@ services:
 
 networks:
   app-network:
-    driver: bridge
+    external: true
